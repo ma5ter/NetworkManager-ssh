@@ -78,6 +78,9 @@ typedef struct {
 	char *remote_addr_6;
 	char *netmask_6;
 
+	/* Replace or not the default route, the default is to replace */
+	gboolean no_default_route;
+
 	/* fds for handling input/output of the SSH process */
 	GIOChannel *ssh_stdin_channel;
 	GIOChannel *ssh_stderr_channel;
@@ -124,6 +127,9 @@ static ValidProperty valid_properties[] = {
 	{ NM_SSH_KEY_AUTH_TYPE,            G_TYPE_STRING, 0, 0, FALSE },
 	{ NM_SSH_KEY_KEY_FILE,             G_TYPE_STRING, 0, 0, FALSE },
 	{ NM_SSH_KEY_PASSWORD"-flags",     G_TYPE_STRING, 0, 0, FALSE },
+	/* FIXME should implement extra-opts */
+	{ NM_SSH_KEY_EXTRA_OPTS,           G_TYPE_STRING, 0, 0, FALSE },
+	{ NM_SSH_KEY_NO_DEFAULT_ROUTE,     G_TYPE_BOOLEAN, 0, 0, FALSE },
 	{ NULL,                            G_TYPE_NONE, FALSE }
 };
 
@@ -440,6 +446,11 @@ send_network_config (NMSshPlugin *plugin)
 	/* IPv4 specific (local_addr, remote_addr, netmask) */
 	g_variant_builder_add (&config, "{sv}", NM_VPN_PLUGIN_CONFIG_HAS_IP4, g_variant_new_boolean (TRUE));
 
+	/* replace default route? */
+	if (io_data->no_default_route) {
+		g_variant_builder_add (&ip4config, "{sv}", NM_VPN_PLUGIN_IP4_CONFIG_NEVER_DEFAULT, g_variant_new_boolean (TRUE));
+	}
+
 	/* local_address */
 	if (io_data->local_addr)
 	{
@@ -477,6 +488,11 @@ send_network_config (NMSshPlugin *plugin)
 	/* IPv6 specific (local_addr_6, remote_addr_6, netmask_6) */
 	if (io_data->ipv6) {
 		g_variant_builder_add (&config, "{sv}", NM_VPN_PLUGIN_CONFIG_HAS_IP6, g_variant_new_boolean (TRUE));
+
+		/* replace default route? */
+		if (io_data->no_default_route) {
+			g_variant_builder_add (&ip6config, "{sv}", NM_VPN_PLUGIN_IP6_CONFIG_NEVER_DEFAULT, g_variant_new_boolean (TRUE));
+		}
 
 		/* local_addr_6 */
 		if (io_data->local_addr_6)
@@ -778,7 +794,7 @@ nm_ssh_start_ssh_binary (NMSshPlugin *plugin,
 	const char *remote = NULL, *port = NULL, *mtu = NULL, *ssh_agent_socket = NULL, *auth_type = NULL;
 	char *known_hosts_file = NULL;
 	char *tmp_arg = NULL;
-	char *ifconfig_cmd_4 = NULL, *ifconfig_cmd_6 = NULL;
+	char *ifconfig_cmd_4 = NULL, *ifconfig_cmd_6 = NULL, *route_cmd_4 = NULL;
 	char *envp[16];
 	long int tmp_int;
 	GPtrArray *args;
@@ -927,6 +943,16 @@ nm_ssh_start_ssh_binary (NMSshPlugin *plugin,
 
 	/* Set verbose mode, we'll parse the arguments */
 	add_ssh_arg (args, "-v");
+
+	/* Dictate whether to replace the default route or not */
+	tmp = nm_setting_vpn_get_data_item (s_vpn, NM_SSH_KEY_NO_DEFAULT_ROUTE);
+	if (tmp && IS_YES(tmp)) {
+		priv->io_data->no_default_route = TRUE;
+	} else {
+		/* That's the default - to replace the default route
+		   It's a VPN after all!! :) */
+		priv->io_data->no_default_route = FALSE;
+	}
 
 	/* FIXME if not using SSH_AUTH_SOCK we can't know where is known_hosts */
 	/* We have SSH_AUTH_SOCK, we'll assume it's owned by the user
@@ -1169,6 +1195,8 @@ nm_ssh_start_ssh_binary (NMSshPlugin *plugin,
 	 * as we passed '-o Hostname=' before that */
 	add_ssh_arg (args, "NetworkManager-ssh");
 
+	#define IFCONFIG "ifconfig"
+
 	/* Command line to run on remote machine */
 	ifconfig_cmd_4 = (gpointer) g_strdup_printf (
 		"%s %s%d inet %s netmask %s pointopoint %s mtu %d",
@@ -1299,6 +1327,13 @@ real_connect (NMVpnServicePlugin   *plugin,
 		             _("Could not process the request because the VPN connection settings were invalid."));
 		return FALSE;
 	}
+
+	// dump settings
+//	guint count;
+//	const char **keys = nm_setting_vpn_get_data_keys(s_vpn, &count);
+//	for (int i = 0; i < count; ++i) {
+//		g_message ("-- settings key: '%s'\n", keys[i]);
+//	}
 
 	user_name = nm_setting_vpn_get_user_name (s_vpn);
 
@@ -1497,9 +1532,28 @@ quit_mainloop (NMVpnServicePlugin *plugin, gpointer user_data)
 	g_main_loop_quit ((GMainLoop *) user_data);
 }
 
+void log_file(const gchar* domain, GLogLevelFlags level, const gchar *message, gpointer user_data)
+{
+	if (message[0]) {
+		time_t utime = time(NULL);
+		struct tm *t = localtime(&utime);
+		FILE *f = fopen("/var/log/nm-ssh-vpn.log", "a");
+		if (strstr(message, "debug1:") == message) message += 7;
+		const char* br = message[strlen(message) - 1] != '\n' ? "\n" : "";
+		fprintf(f, "%02u:%02u:%02u %02u.%02u.%04u %s%s", t->tm_hour, t->tm_min, t->tm_sec, t->tm_mday, t->tm_mon+1, t->tm_year + 1900, message, br);
+		fclose(f);
+	}
+}
+
 int
 main (int argc, char *argv[])
 {
+//	setenv("G_MESSAGES_DEBUG", "all", 1);
+	g_log_set_handler(NULL, G_LOG_LEVEL_CRITICAL, log_file, NULL);
+	g_log_set_handler(NULL, G_LOG_LEVEL_WARNING, log_file, NULL);
+	g_log_set_handler(NULL, G_LOG_LEVEL_MESSAGE, log_file, NULL);
+//	g_log_set_handler(NULL, G_LOG_LEVEL_DEBUG, log_file, NULL);
+
 	NMSshPlugin *plugin;
 	gboolean persist = FALSE;
 	GOptionContext *opt_ctx = NULL;

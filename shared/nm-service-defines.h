@@ -47,6 +47,8 @@
 #define	NM_SSH_KEY_AUTH_TYPE "auth-type"
 #define	NM_SSH_KEY_KEY_FILE "key-file"
 #define	NM_SSH_KEY_PASSWORD "password"
+#define	NM_SSH_KEY_EXTRA_OPTS "extra-opts"
+#define	NM_SSH_KEY_NO_DEFAULT_ROUTE "no-default-route"
 
 #define	NM_SSH_DEFAULT_PORT 22
 #define	NM_SSH_DEFAULT_MTU 1500
