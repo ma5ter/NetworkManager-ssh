@@ -53,6 +53,7 @@
 #define	NM_SSH_DEFAULT_PORT 22
 #define	NM_SSH_DEFAULT_MTU 1500
 #define	NM_SSH_DEFAULT_REMOTE_DEV 100
+#define	NM_SSH_DEFAULT_EXTRA_OPTS "-o ServerAliveInterval=10 -o TCPKeepAlive=yes"
 #define	NM_SSH_DEFAULT_REMOTE_USERNAME "root"
 
 #define	NM_SSH_AUTH_TYPE_SSH_AGENT "ssh-agent"
